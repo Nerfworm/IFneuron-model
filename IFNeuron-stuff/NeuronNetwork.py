@@ -1,4 +1,4 @@
-from IFneuron import *
+import IFneuron
 
 class NeuronNetwork:
     '''
