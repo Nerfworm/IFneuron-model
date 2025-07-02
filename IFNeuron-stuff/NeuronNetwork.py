@@ -9,7 +9,7 @@ class NeuronNetwork:
         self.all_neurons = {}
 
     def add_neuron(self, neuron_id:str):
-        neuron = IFneuron(neuron_id)
+        neuron = IFneuron.IFneuron(neuron_id)
         if neuron in self.all_neurons:
             print(f'Neuron: {neuron.id} already exists. Use a different id.')
             return
@@ -52,6 +52,15 @@ class NeuronNetwork:
         This can be used to get the run time(ms) of the system.
         '''
         return self.all_neurons[neuron_id].t_recorded_ms
+    
+    def get_neuron_receptors(self, neuron_id:str) -> list:
+        '''
+        Returns individual neuron receptors list.
+        '''
+        receptors = []
+        for connection in self.all_neurons[neuron_id].receptors:
+            receptors.append((connection[0].id, connection[1]))
+        return receptors
 
     def get_all_neurons(self) -> list:
         '''
