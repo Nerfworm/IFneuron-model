@@ -32,12 +32,12 @@ def generate_random_stimulation_times_ms(num_stims:int, max_time_ms:float, min_t
     respecting `min_time_between_stim_ms`.
     '''
     stimulation_times = []
-    current_time = 0.0
+    current_time = 0
     time_per_stim_slot = max_time_ms / num_stims
 
     for i in range(num_stims):
         min_current_stim_time = current_time + min_time_between_stim_ms
-        upper_limit_from_distribution = (i + 1) * time_per_stim_slot
+        upper_limit_from_distribution = int((i + 1) * time_per_stim_slot)
         remaining_stims_to_place = num_stims - (i + 1)
         upper_limit_from_remaining_space = max_time_ms - (remaining_stims_to_place * min_time_between_stim_ms)
         upper_bound = min(upper_limit_from_distribution, upper_limit_from_remaining_space)
@@ -46,7 +46,10 @@ def generate_random_stimulation_times_ms(num_stims:int, max_time_ms:float, min_t
         if lower_bound > upper_bound:
             return stimulation_times
 
-        stim_time = lower_bound if lower_bound == upper_bound else numpy.random.uniform(lower_bound, upper_bound + numpy.finfo(float).eps)
+        if lower_bound == upper_bound:
+            stim_time = lower_bound
+        else:
+            stim_time = numpy.random.randint(lower_bound, upper_bound + 1)
         
         stimulation_times.append(stim_time)
         current_time = stim_time
