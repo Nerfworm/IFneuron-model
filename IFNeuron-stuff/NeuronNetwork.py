@@ -1,4 +1,5 @@
 import IFneuron
+import numpy as np
 
 class NeuronNetwork:
     '''
@@ -39,6 +40,16 @@ class NeuronNetwork:
         Returns individual neuron spike times(ms) as a list.
         '''
         return self.all_neurons[neuron_id].t_act_ms
+    
+    def get_neuron_spike_train(self, neuron_id:str) -> list:
+        '''
+        Returns list of length simulation runtime where
+        1s are recorded spikes.
+        '''
+        spike_train = np.zeros(len(self.get_neuron_run_time_ms(neuron_id)))
+        for i in self.get_neuron_spike_times_ms(neuron_id):
+            spike_train[i] = 1
+        return spike_train
     
     def get_neuron_membrane_potentials(self, neuron_id:str) -> list:
         '''
