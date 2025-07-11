@@ -3,16 +3,16 @@ from utils import generate_random_stimulation_times_ms
 from NeuronDataWriter import NeuronDataWriter
 import numpy as np
 
-writer = NeuronDataWriter("test-1000-ms.hdf5")
-num_trials = 2                      # number of trials to run
-simulation_run_time_ms = 1000       # simulated run time
-num_stims = 5                       # number of neuron stimulations
+writer = NeuronDataWriter("test-3000-ms.hdf5")
+num_trials = 5                      # number of trials to run
+simulation_run_time_ms = 3000       # simulated run time
+num_stims = 10                       # number of neuron stimulations
 min_time_between_stims_ms = 100     # min amount of time between stimulus
-input_stimulus_a = generate_random_stimulation_times_ms(num_stims, simulation_run_time_ms, min_time_between_stims_ms)
-input_stimulus_b = generate_random_stimulation_times_ms(num_stims, simulation_run_time_ms, min_time_between_stims_ms)
 
 for trial_idx in range(num_trials):
     ground_truth_system = NeuronNetwork('Ground Truth system')
+    input_stimulus_a = generate_random_stimulation_times_ms(num_stims, simulation_run_time_ms, min_time_between_stims_ms)
+    input_stimulus_b = generate_random_stimulation_times_ms(num_stims, simulation_run_time_ms, min_time_between_stims_ms)
 
     ground_truth_system.add_neuron('Neuron_A')  # input neuron
     ground_truth_system.add_neuron('Neuron_B')  # input neuron
@@ -28,7 +28,7 @@ for trial_idx in range(num_trials):
 
     ground_truth_system.add_neuron_connection('Neuron_D', 'Neuron_E', 1.0)   # Neuron_D -> Neuron_E
     ground_truth_system.add_neuron_connection('Neuron_C', 'Neuron_E', -1.0)  # Neuron_C -> Neuron_E
-
+    
     ground_truth_system.set_direct_stimulation_time_ms('Neuron_A', input_stimulus_a)
 
     ground_truth_system.set_direct_stimulation_time_ms('Neuron_B', input_stimulus_b)
