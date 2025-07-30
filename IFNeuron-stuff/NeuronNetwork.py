@@ -84,6 +84,12 @@ class NeuronNetwork:
         Returns list of all neuron ids
         '''
         return list(self.all_neurons.keys())
+    
+    def get_network_id(self) -> str:
+        '''
+        Returns the id of the neuron network.
+        '''
+        return self.id
 
     def print_all_neurons(self):
         print(self.all_neurons)
