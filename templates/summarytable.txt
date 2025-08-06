@@ -1,0 +1,11 @@
+KS Statistic (Kolmogorov-Smirnov Statistic)
+The Kolmogorov-Smirnov (KS) statistic measures the maximum distance between the cumulative distribution functions of two datasets. A value of 0.0 typically indicates a perfect match between the distributions, suggesting the model's predictions align perfectly with the actual data. 
+
+Pearson Correlation
+The Pearson correlation coefficient measures the linear relationship between two variables, in this case, the predicted and actual values. It ranges from -1 to +1. A value of 1.0 indicates a perfect positive linear relationship, where the predicted and actual values increase together perfectly. 
+
+RMSE (Root Mean Square Error)
+The Root Mean Square Error (RMSE) is a measure of the differences between values predicted by a model and the actual observed values. It's the square root of the average of the squared errors. An RMSE of 0.0 signifies that the model's predictions were exactly the same as the actual values, meaning there was no error.
+
+Overall Score
+The Overall Score is a combined metric that evaluates the performance of each Neuron based on the other statistics. 
