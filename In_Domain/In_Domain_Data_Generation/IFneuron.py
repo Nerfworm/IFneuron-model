@@ -1,147 +1,193 @@
 # IFneuron.py
 # ----------------------------
-# Minimal integrate-and-fire neuron used to build tiny circuits.
-# This class supports:
-#   • Direct stimulation (forcing a spike at specific ms times)
-#   • Synaptic input from other neurons (double-exponential PSPs)
-#   • Simple after-hyperpolarization (AHP)
-#   • Optional spontaneous activity (disabled by default)
+# Integrate-and-fire neuron model for building simple neural circuits.
 #
-# For our in-domain trial generator, each trial runs for a fixed number
-# of milliseconds (e.g., 100 ms). Neurons A and/or B may receive ONE
-# direct stimulus time inside that trial window, or none (00 case).
-# The rest of the circuit (C, D, E) responds via synaptic connections.
+# Features:
+#   • Direct stimulation at specific times
+#   • Synaptic input from other neurons (double-exponential PSPs)
+#   • After-hyperpolarization (AHP) 
+#   • Optional spontaneous activity
+#
+# Example usage:
+#     # Create and connect neurons
+#     neuronA = IFneuron("A")
+#     neuronB = IFneuron("B")
+#     neuronB.receptors.append((neuronA, 1.0))  # B receives input from A
+#     
+#     # Schedule direct stimulation
+#     neuronA.attach_direct_stim(10.0)
+#     
+#     # Simulate for 100ms
+#     for t in range(100):
+#         neuronA.update(t, recording=True)
+#         neuronB.update(t, recording=True)
+#     
+#     # Access results
+#     spike_times = neuronA.t_act_ms
+#     voltage_trace = neuronA.get_recording()
 
 import numpy as np
 import scipy.stats as stats
+from typing import List, Tuple, Optional, Dict
+
 
 def dblexp(amp: float, tau_rise: float, tau_decay: float, tdiff: float) -> float:
     """
     Double-exponential postsynaptic potential kernel.
-    Returns 0 if the event has not happened yet (tdiff < 0).
+    Standard model in computational neuroscience for PSP/PSC dynamics.
+    
+    Implements: amp * (-exp(-t/τr) + exp(-t/τd)) for t >= 0
+    
+    Args:
+        amp: Peak amplitude of the PSP (mV)
+        tau_rise: Rise time constant (ms) - controls how fast PSP reaches peak
+        tau_decay: Decay time constant (ms) - controls how fast PSP returns to baseline
+        tdiff: Time since presynaptic spike (ms)
+    
+    Returns:
+        PSP amplitude at time tdiff (returns 0 if tdiff < 0)
     """
     if tdiff < 0:
         return 0.0
     return amp * (-np.exp(-tdiff / tau_rise) + np.exp(-tdiff / tau_decay))
 
+
 class IFneuron:
     """
-    Simple integrate-and-fire neuron with:
-      - Direct stim times (absolute ms within the current run)
-      - Synaptic inputs from other neurons (each with a weight)
-      - Threshold crossing to register spikes
-      - Basic refractory-like behavior using a spike term + AHP
+    Integrate-and-fire neuron model.
+    
+    Membrane dynamics:
+      Vm(t) = Vrest + vSpike(t) + vAHP(t) + vPSP(t)
+    
+    Key parameters:
+      - Time resolution: 1ms steps
+      - Absolute refractory period: 1ms
+      - Threshold: -50mV (default)
+      - Resting potential: -60mV
     """
+    
     def __init__(self, id: str):
-        # Identity / bookkeeping
+        # Identity
         self.id = id
 
-        # Direct stimulation: when to force spikes (absolute times in ms)
-        self.t_directstim_ms = []
-        self.t_directstim_ms_orig = []
+        # Direct stimulation times (ms)
+        self.t_directstim_ms: List[float] = []
+        self.t_directstim_ms_orig: List[float] = []  # backup
 
-        # Membrane potential state and parameters (mV)
-        self.Vm_mV = -60.0            # current membrane potential
-        self.Vrest_mV = -60.0         # resting potential (baseline)
-        self.Vact_mV = -50.0          # threshold for spike detection
+        # Membrane potential parameters (mV)
+        self.Vm_mV: float = -60.0            # current membrane potential
+        self.Vrest_mV: float = -60.0         # resting potential
+        self.Vact_mV: float = -50.0          # spike threshold
 
-        # After-hyperpolarization (AHP) effect
-        self.Vahp_mV = -20.0          # AHP amplitude (negative drives Vm down)
-        self.tau_AHP_ms = 30.0        # AHP decay time constant
+        # After-hyperpolarization parameters
+        self.Vahp_mV: float = -20.0          # AHP amplitude (negative drives Vm down)
+        self.tau_AHP_ms: float = 30.0        # AHP decay time constant
 
-        # Synaptic PSP parameters (identical for all receptors here)
-        self.tau_PSPr = 5.0           # PSP rise time constant
-        self.tau_PSPd = 25.0          # PSP decay time constant
-        self.vPSP = 20.0              # PSP amplitude scale
+        # Synaptic PSP parameters
+        self.tau_PSPr: float = 5.0           # PSP rise time constant
+        self.tau_PSPd: float = 25.0          # PSP decay time constant
+        self.vPSP: float = 20.0              # PSP amplitude scale
 
-        # Optional spontaneous activity (disabled when mean=0)
-        self.tau_spont_mean_stdev_ms = (0, 0)
-        self.t_spont_next = -1
-        self.dt_spont_dist = None
+        # Spontaneous activity (disabled when mean=0)
+        self.tau_spont_mean_stdev_ms: Tuple[float, float] = (0, 0)
+        self.t_spont_next: float = -1
+        self.dt_spont_dist: Optional[stats.rv_continuous] = None
 
-        # Incoming synapses: list of (source_neuron, weight)
-        self.receptors = []
+        # Synaptic inputs: list of (source_neuron, weight)
+        self.receptors: List[Tuple['IFneuron', float]] = []
 
-        # Internal step state
-        self.t_ms = 0                 # last update time (ms)
-        self._has_spiked = False
-        self.in_absref = False        # pseudo absolute refractory flag
-        self.t_act_ms = []            # spike times (ms)
-        self._dt_act_ms = None        # ms since last spike (for PSP/AHP)
+        # State variables
+        self.t_ms: float = 0                 # last update time
+        self._has_spiked: bool = False
+        self.in_absref: bool = False         # absolute refractory flag
+        self.t_act_ms: List[float] = []      # spike times
+        self._dt_act_ms: Optional[float] = None
 
-        # Recording buffers (time series over the run)
-        self.t_recorded_ms = []       # times recorded
-        self.Vm_recorded = []         # Vm values recorded
+        # Recording buffers
+        self.t_recorded_ms: List[float] = []
+        self.Vm_recorded: List[float] = []
 
-    # ------------ Setup helpers ------------
     def attach_direct_stim(self, t_ms: float):
-        """Append a single direct stimulation time (ms) for this run."""
+        """Add a direct stimulation time."""
         self.t_directstim_ms.append(t_ms)
 
-    def set_spontaneous_activity(self, mean_stdev: tuple):
+    def set_spontaneous_activity(self, mean_stdev: Tuple[float, float]):
         """
-        Enable/disable spontaneous activity.
-        mean_stdev = (mean_ms, stdev_ms). If mean or stdev is 0, disable.
+        Configure spontaneous firing.
+        
+        Args:
+            mean_stdev: (mean_ms, stdev_ms) for interspike intervals.
+                       Disabled if mean or stdev is 0.
+                       Uses truncated normal distribution over [0, 2*mean].
         """
         self.tau_spont_mean_stdev_ms = mean_stdev
         mu, sigma = self.tau_spont_mean_stdev_ms
         if mu == 0 or sigma == 0:
             self.dt_spont_dist = None
             return
-        # Truncated normal over [0, 2*mu]
+        # Truncated normal prevents negative or extreme intervals
         a, b = 0, 2 * mu
         self.dt_spont_dist = stats.truncnorm(
             (a - mu) / sigma, (b - mu) / sigma, loc=mu, scale=sigma
         )
 
-    # ------------ Recording helpers ------------
     def record(self, t_ms: float):
-        """Record current time and membrane potential."""
+        """Record current state for analysis."""
         self.t_recorded_ms.append(t_ms)
         self.Vm_recorded.append(self.Vm_mV)
 
-    # ------------ Spike-state helpers ------------
     def has_spiked(self) -> bool:
-        """Return True if at least one spike has occurred this run."""
+        """Check if neuron has fired at least once."""
         self._has_spiked = len(self.t_act_ms) > 0
         return self._has_spiked
 
     def dt_act_ms(self, t_ms: float) -> float:
         """
-        Return ms elapsed since last spike. Large sentinel if never spiked.
-        Used by PSP/AHP to compute time since last presynaptic spike.
+        Time since last spike.
+        
+        Returns:
+            ms since last spike, or 1e9 if never spiked.
+            Large value ensures PSP/AHP calculations return ~0 for inactive neurons.
         """
         if self._has_spiked:
             self._dt_act_ms = t_ms - self.t_act_ms[-1]
             return self._dt_act_ms
         return 1e9
 
-    # ------------ Components contributing to Vm ------------
     def vSpike_t(self, t_ms: float) -> float:
         """
-        Represents a brief spike pulse effect + sets a pseudo absolute refractory.
-        If the last spike was <= 1 ms ago, return a large positive pulse and
-        mark in_absref to block immediate re-firing via threshold.
+        Spike depolarization component.
+        Sets absolute refractory flag to prevent immediate re-firing.
+        
+        Returns:
+            60mV during 1ms refractory period (visual spike peak), 0 otherwise
         """
         if not self._has_spiked:
             return 0.0
-        self.in_absref = self._dt_act_ms <= 1.0
+        self.in_absref = self._dt_act_ms <= 1.0  # 1ms absolute refractory
         if self.in_absref:
-            return 60.0  # spike pulse
+            return 60.0
         return 0.0
 
     def vAHP_t(self, t_ms: float) -> float:
-        """After-hyperpolarization decays from the last spike."""
-        if not self._has_spiked:
-            return 0.0
-        if self.in_absref:
+        """
+        After-hyperpolarization component.
+        Models K+ conductance that hyperpolarizes the cell after firing.
+        
+        Returns:
+            Negative voltage that decays exponentially with tau_AHP_ms
+        """
+        if not self._has_spiked or self.in_absref:
             return 0.0
         return self.Vahp_mV * np.exp(-self._dt_act_ms / self.tau_AHP_ms)
 
     def vPSP_t(self, t_ms: float) -> float:
         """
-        Sum synaptic PSPs from all presynaptic neurons that have spiked.
-        Uses double-exponential kernel per presynaptic source.
+        Sum synaptic inputs from all connected neurons.
+        Uses double-exponential kernel for each presynaptic source.
+        
+        Returns:
+            Total PSP contribution (linear summation assumes synaptic independence)
         """
         vPSPt = 0.0
         for src_cell, weight in self.receptors:
@@ -150,79 +196,79 @@ class IFneuron:
                 vPSPt += dblexp(weight * self.vPSP, self.tau_PSPr, self.tau_PSPd, dtPSP)
         return vPSPt
 
-    # ------------ Update & detection ------------
     def update_Vm(self, t_ms: float, recording: bool):
         """
-        Compute Vm(t) = Vrest + vSpike(t) + vAHP(t) + vPSP(t).
-        Optionally record Vm and time.
+        Update membrane potential: Vm(t) = Vrest + vSpike(t) + vAHP(t) + vPSP(t)
+        
+        Note: Order matters - vSpike_t() sets the in_absref flag used by other components.
         """
-        # Update dt since last spike (for PSP/AHP terms)
+        # Update time since last spike
         if self.has_spiked():
             self.dt_act_ms(t_ms)
 
-        # Aggregate terms
+        # Calculate voltage components
         vSpike_t = self.vSpike_t(t_ms)
         vAHP_t = self.vAHP_t(t_ms)
         vPSP_t = self.vPSP_t(t_ms)
 
-        # New membrane potential
+        # Update membrane potential
         self.Vm_mV = self.Vrest_mV + vSpike_t + vAHP_t + vPSP_t
 
-        # Save trace if requested
         if recording:
             self.record(t_ms)
 
     def detect_threshold(self, t_ms: float):
-        """If not in pseudo-absolute-refractory and Vm >= threshold, log a spike."""
-        if self.in_absref:
-            return
-        if self.Vm_mV >= self.Vact_mV:
+        """Check for threshold crossing and register spike."""
+        if not self.in_absref and self.Vm_mV >= self.Vact_mV:
             self.t_act_ms.append(t_ms)
 
     def spontaneous_activity(self, t_ms: float):
-        """
-        Optional spontaneous spiking schedule.
-        Disabled by default (mean=0). If enabled, it schedules the next
-        spontaneous spike time and triggers spikes accordingly.
-        """
+        """Handle spontaneous spike generation if enabled."""
         if self.in_absref:
             return
         mu = self.tau_spont_mean_stdev_ms[0]
-        if mu == 0:  # disabled
+        if mu == 0:  # Disabled
             return
         if t_ms >= self.t_spont_next:
             if self.t_spont_next >= 0:
                 self.t_act_ms.append(t_ms)
+            # Schedule next spontaneous spike
             dt_spont = float(self.dt_spont_dist.rvs(1)[0])
             self.t_spont_next = t_ms + dt_spont
 
-    def update(self, t_ms: float, recording: bool):
+    def update(self, t_ms: float, recording: bool = False):
         """
-        One simulation step at time t_ms:
-          1) Fire direct stim if scheduled at/ before this time
-          2) Update Vm, check threshold crossing, optional spontaneous spike
-          3) Store last update time
+        Main simulation step:
+        1. Process direct stimulation
+        2. Update membrane potential
+        3. Check for threshold crossing
+        4. Handle spontaneous activity
+        
+        Args:
+            t_ms: Current simulation time (ms)
+            recording: Whether to record Vm trace
         """
         tdiff_ms = t_ms - self.t_ms
         if tdiff_ms < 0:
-            return  # ignore out-of-order updates
+            return
 
-        # Direct stimulation: pop the next stim when its time arrives
-        if self.t_directstim_ms:
-            if self.t_directstim_ms[0] <= t_ms:
-                tfire_ms = self.t_directstim_ms.pop(0)
-                self.t_act_ms.append(tfire_ms)
+        # Fire if direct stimulation is scheduled
+        if self.t_directstim_ms and self.t_directstim_ms[0] <= t_ms:
+            tfire_ms = self.t_directstim_ms.pop(0)
+            self.t_act_ms.append(tfire_ms)
 
-        # Update Vm and detect threshold crossing
+        # Update state
         self.update_Vm(t_ms, recording)
         self.detect_threshold(t_ms)
-
-        # Optional spontaneous schedule
         self.spontaneous_activity(t_ms)
 
-        # Remember last time
         self.t_ms = t_ms
 
-    def get_recording(self) -> dict:
-        """Convenience accessor for recorded Vm."""
+    def get_recording(self) -> Dict[str, List[float]]:
+        """
+        Get recorded membrane potential trace.
+        
+        Returns:
+            Dictionary with 'Vm' key containing voltage values
+        """
         return {'Vm': self.Vm_recorded}
